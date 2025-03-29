@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Web Labeling Tool</title>
+    <style>
+        .container { display: flex; }
+        .tools { width: 200px; padding: 20px; }
+        .canvas-container { flex-grow: 1; }
+        #imageCanvas { border: 1px solid #000; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="tools">
+            <h3>Tools</h3>
+            <button onclick="setMode('box')">Box</button>
+            <button onclick="setMode('polygon')">Polygon</button>
+            <button onclick="setMode('point')">Point</button>
+            <button onclick="requestAutoLabel()">Auto Label</button>
+            
+            <h3>Labels</h3>
+            <input type="text" id="labelName" placeholder="Label name">
+            <button onclick="saveLabel()">Save Label</button>
+            
+            <h3>Files</h3>
+            <input type="file" id="fileInput" onchange="handleFileUpload()">
+            <button onclick="exportLabels()">Export Labels</button>
+        </div>
+        
+        <div class="canvas-container">
+            <canvas id="imageCanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let canvas = new fabric.Canvas('imageCanvas');
+        let currentMode = 'box';
+        let currentShape = null;
+        
+        function setMode(mode) {
+            currentMode = mode;
+            canvas.isDrawingMode = mode === 'polygon';
+        }
+        
+        function handleFileUpload() {
+            const file = document.getElementById('fileInput').files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadImage(data.filename);
+            });
+        }
+        
+        function loadImage(filename) {
+            fabric.Image.fromURL(`/uploads/${filename}`, function(img) {
+                canvas.setWidth(img.width);
+                canvas.setHeight(img.height);
+                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+            });
+        }
+        
+        function requestAutoLabel() {
+            fetch('/auto_label', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    points: getCanvasPoints()
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                drawMask(data.mask);
+            });
+        }
+        
+        function getCanvasPoints() {
+            // Get all point objects from canvas
+            return canvas.getObjects('circle').map(obj => ({
+                x: obj.left,
+                y: obj.top
+            }));
+        }
+        
+        function drawMask(maskData) {
+            // Convert mask data to fabric path and add to canvas
+            // Implementation depends on mask format
+        }
+        
+        function saveLabel() {
+            const label = document.getElementById('labelName').value;
+            const shapes = canvas.getObjects().map(obj => ({
+                type: obj.type,
+                points: obj.type === 'polygon' ? obj.points : [obj.left, obj.top, obj.width, obj.height],
+                label: label
+            }));
+            
+            fetch('/save_label', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    shapes: shapes,
+                    label: label
+                })
+            });
+        }
+        
+        function exportLabels() {
+            window.location.href = '/export_labels';
+        }
+        
+        // Initialize canvas event listeners
+        canvas.on('mouse:down', function(options) {
+            if (currentMode === 'box') {
+                const pointer = canvas.getPointer(options.e);
+                currentShape = new fabric.Rect({
+                    left: pointer.x,
+                    top: pointer.y,
+                    width: 0,
+                    height: 0,
+                    fill: 'transparent',
+                    stroke: 'red',
+                    strokeWidth: 2
+                });
+                canvas.add(currentShape);
+            }
+            else if (currentMode === 'point') {
+                const pointer = canvas.getPointer(options.e);
+                const point = new fabric.Circle({
+                    left: pointer.x,
+                    top: pointer.y,
+                    radius: 5,
+                    fill: 'red',
+                    originX: 'center',
+                    originY: 'center'
+                });
+                canvas.add(point);
+            }
+        });
+        
+        canvas.on('mouse:move', function(options) {
+            if (currentShape && currentMode === 'box') {
+                const pointer = canvas.getPointer(options.e);
+                currentShape.set({
+                    width: pointer.x - currentShape.left,
+                    height: pointer.y - currentShape.top
+                });
+                canvas.renderAll();
+            }
+        });
+        
+        canvas.on('mouse:up', function() {
+            currentShape = null;
+        });
+    </script>
+</body>
+</html>

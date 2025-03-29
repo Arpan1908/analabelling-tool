@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Web Labeling Tool</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        .container { 
+            display: flex; 
+            height: 100vh;
+        }
+        .tools { 
+            width: 200px; 
+            padding: 20px;
+            border-right: 1px solid #ddd;
+            background-color: #f8f8f8;
+        }
+        .canvas-container { 
+            flex-grow: 1;
+            position: relative;
+        }
+        #imageCanvas { 
+            border: 1px solid #ddd; 
+        }
+        .header {
+            background-color: #f5f5f5;
+            padding: 8px 15px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .mode-indicator {
+            font-weight: bold;
+        }
+        .shortcuts {
+            color: #666;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        .header-buttons {
+            display: flex;
+            gap: 5px;
+        }
+        .header-button {
+            padding: 4px 10px;
+            background-color: #eee;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .header-button:hover {
+            background-color: #e0e0e0;
+        }
+        .predict-button {
+            background-color: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+        .grid-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .grid-line-h, .grid-line-v {
+            position: absolute;
+            background-color: rgba(0, 255, 0, 0.2);
+        }
+        .grid-line-h {
+            width: 100%;
+            height: 1px;
+        }
+        .grid-line-v {
+            height: 100%;
+            width: 1px;
+        }
+        .label-section {
+            margin-top: 20px;
+        }
+        .label-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .color-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .tools h3 {
+            margin-top: 20px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+        .tools button {
+            margin-right: 5px;
+            margin-bottom: 5px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        #labelName {
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 5px;
+        }
+        #fileInput {
+            margin-bottom: 10px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <span class="mode-indicator">Mode: Auto Labelling</span>
+            <span class="shortcuts">| Shortcuts: Previous: A, Next: D, Rectangle: R, Polygon: P</span>
+        </div>
+        <div class="header-buttons">
+            <button class="header-button predict-button" onclick="requestAutoLabel()">Predict</button>
+            <button class="header-button" onclick="setMode('point')">Point</button>
+            <button class="header-button" onclick="clearCanvas()">Clear</button>
+            <button class="header-button" onclick="finishShape()">Finish Shape (↵)</button>
+        </div>
+        <div>
+            <span>Model loaded: Ready for labeling</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tools">
+            <h3>Tools</h3>
+            <button onclick="setMode('box')">Box</button>
+            <button onclick="setMode('polygon')">Polygon</button>
+            <button onclick="setMode('point')">Point</button>
+            <button onclick="requestAutoLabel()">Auto Label</button>
+            
+            <h3>Labels</h3>
+            <input type="text" id="labelName" placeholder="Label name">
+            <button onclick="saveLabel()">Save Label</button>
+            
+            <div class="label-section">
+                <div class="label-item">
+                    <div class="color-dot" style="background-color: #FF6347;"></div>
+                    <span>mango</span>
+                </div>
+                <div class="label-item">
+                    <div class="color-dot" style="background-color: #FFD700;"></div>
+                    <span>kiwi</span>
+                </div>
+                <div class="label-item">
+                    <div class="color-dot" style="background-color: #CD5C5C;"></div>
+                    <span>apple</span>
+                </div>
+                <div class="label-item">
+                    <div class="color-dot" style="background-color: #4B0082;"></div>
+                    <span>grape</span>
+                </div>
+            </div>
+            
+            <h3>Files</h3>
+            <input type="file" id="fileInput" onchange="handleFileUpload()">
+            <button onclick="exportLabels()">Export Labels</button>
+        </div>
+        
+        <div class="canvas-container">
+            <div class="grid-overlay" id="gridOverlay"></div>
+            <canvas id="imageCanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Canvas setup
+        let canvas = new fabric.Canvas('imageCanvas', {
+            width: window.innerWidth - 200,
+            height: window.innerHeight - 50
+        });
+        let currentMode = 'box';
+        let currentShape = null;
+        let labelColors = {
+            'mango': '#FF6347',
+            'kiwi': '#FFD700',
+            'apple': '#CD5C5C',
+            'grape': '#4B0082'
+        };
+        
+        // Create grid overlay
+        function createGrid() {
+            const gridOverlay = document.getElementById('gridOverlay');
+            gridOverlay.innerHTML = '';
+            gridOverlay.style.width = `${canvas.width}px`;
+            gridOverlay.style.height = `${canvas.height}px`;
+            
+            // Create horizontal lines
+            for (let i = 1; i < 3; i++) {
+                const lineH = document.createElement('div');
+                lineH.className = 'grid-line-h';
+                lineH.style.top = `${i * (canvas.height / 3)}px`;
+                gridOverlay.appendChild(lineH);
+            }
+            
+            // Create vertical lines
+            for (let i = 1; i < 3; i++) {
+                const lineV = document.createElement('div');
+                lineV.className = 'grid-line-v';
+                lineV.style.left = `${i * (canvas.width / 3)}px`;
+                gridOverlay.appendChild(lineV);
+            }
+        }
+        
+        function setMode(mode) {
+            currentMode = mode;
+            canvas.isDrawingMode = mode === 'polygon';
+            document.querySelector('.mode-indicator').textContent = `Mode: ${mode.charAt(0).toUpperCase() + mode.slice(1)}`;
+        }
+        
+        function handleFileUpload() {
+            const file = document.getElementById('fileInput').files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadImage(data.filename);
+            });
+        }
+        
+        function loadImage(filename) {
+            fabric.Image.fromURL(`/uploads/${filename}`, function(img) {
+                canvas.setWidth(img.width);
+                canvas.setHeight(img.height);
+                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+                createGrid();
+            });
+        }
+        
+        function requestAutoLabel() {
+            fetch('/auto_label', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    points: getCanvasPoints()
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                drawMask(data.mask);
+            });
+        }
+        
+        function getCanvasPoints() {
+            // Get all point objects from canvas
+            return canvas.getObjects('circle').map(obj => ({
+                x: obj.left,
+                y: obj.top
+            }));
+        }
+        
+        function drawMask(maskData) {
+            // Convert mask data to fabric path and add to canvas
+            // Implementation depends on mask format
+            console.log("Received mask data:", maskData);
+            
+            // Placeholder implementation - This would be replaced with actual mask rendering
+            if (maskData && maskData.length > 0) {
+                const width = canvas.width;
+                const height = canvas.height;
+                
+                // Create a path from the mask boundary (simplified example)
+                const pathData = [];
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        // This is placeholder logic - real implementation would convert maskData to path points
+                        if (x % 50 === 0 && y % 50 === 0) {
+                            pathData.push({x, y});
+                        }
+                    }
+                }
+                
+                if (pathData.length > 2) {
+                    const polygon = new fabric.Polygon(pathData, {
+                        fill: 'rgba(255, 0, 0, 0.2)',
+                        stroke: 'red',
+                        strokeWidth: 2,
+                        objectCaching: false
+                    });
+                    canvas.add(polygon);
+                    canvas.renderAll();
+                }
+            }
+        }
+        
+        function saveLabel() {
+            const label = document.getElementById('labelName').value;
+            if (!label) {
+                alert("Please enter a label name");
+                return;
+            }
+            
+            const shapes = canvas.getObjects().map(obj => ({
+                type: obj.type,
+                points: obj.type === 'polygon' ? obj.points : [obj.left, obj.top, obj.width, obj.height],
+                label: label
+            }));
+            
+            fetch('/save_label', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    shapes: shapes,
+                    label: label
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Add new label to the list
+                    const color = labelColors[label] || getRandomColor();
+                    labelColors[label] = color;
+                    
+                    const labelSection = document.querySelector('.label-section');
+                    const labelItem = document.createElement('div');
+                    labelItem.className = 'label-item';
+                    labelItem.innerHTML = `
+                        <div class="color-dot" style="background-color: ${color};"></div>
+                        <span>${label}</span>
+                    `;
+                    labelSection.appendChild(labelItem);
+                }
+            });
+        }
+        
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+        
+        function exportLabels() {
+            window.location.href = '/export_labels';
+        }
+        
+        function clearCanvas() {
+            // Keep background image but remove all objects
+            const backgroundImage = canvas.backgroundImage;
+            canvas.clear();
+            if (backgroundImage) {
+                canvas.setBackgroundImage(backgroundImage, canvas.renderAll.bind(canvas));
+            }
+        }
+        
+        function finishShape() {
+            // This would complete the current polygon or shape being drawn
+            if (currentMode === 'polygon') {
+                // Implementation would depend on how polygon drawing is implemented
+                alert("Shape finished");
+            }
+        }
+        
+        // Initialize canvas event listeners
+        canvas.on('mouse:down', function(options) {
+            if (currentMode === 'box') {
+                const pointer = canvas.getPointer(options.e);
+                currentShape = new fabric.Rect({
+                    left: pointer.x,
+                    top: pointer.y,
+                    width: 0,
+                    height: 0,
+                    fill: 'transparent',
+                    stroke: 'red',
+                    strokeWidth: 2
+                });
+                canvas.add(currentShape);
+            }
+            else if (currentMode === 'point') {
+                const pointer = canvas.getPointer(options.e);
+                const point = new fabric.Circle({
+                    left: pointer.x,
+                    top: pointer.y,
+                    radius: 5,
+                    fill: 'red',
+                    originX: 'center',
+                    originY: 'center'
+                });
+                canvas.add(point);
+            }
+        });
+        
+        canvas.on('mouse:move', function(options) {
+            if (currentShape && currentMode === 'box') {
+                const pointer = canvas.getPointer(options.e);
+                currentShape.set({
+                    width: pointer.x - currentShape.left,
+                    height: pointer.y - currentShape.top
+                });
+                canvas.renderAll();
+            }
+        });
+        
+        canvas.on('mouse:up', function() {
+            currentShape = null;
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            canvas.setWidth(window.innerWidth - 200);
+            canvas.setHeight(window.innerHeight - 50);
+            createGrid();
+            canvas.renderAll();
+        });
+
+        // Initialize keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'r' || e.key === 'R') {
+                setMode('box');
+            } else if (e.key === 'p' || e.key === 'P') {
+                setMode('polygon');
+            } else if (e.key === 'Enter') {
+                finishShape();
+            }
+        });
+
+        // Initialize application
+        window.onload = function() {
+            createGrid();
+            
+            // Load a placeholder image for development
+            fabric.Image.fromURL('/api/placeholder/800/600', function(img) {
+                canvas.setWidth(img.width);
+                canvas.setHeight(img.height);
+                canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+                createGrid();
+            });
+        };
+    </script>
+</body>
+</html>

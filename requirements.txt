@@ -1,0 +1,24 @@
+# requirements.txt
+
+# Common dependencies
+Pillow==10.2.0
+numpy==1.26.4
+opencv-python==4.9.0.80
+
+# Flask implementation dependencies
+Flask==3.0.2
+Werkzeug==3.0.1
+segment-anything==1.0
+
+# FastAPI implementation dependencies
+fastapi==0.109.2
+uvicorn==0.27.1
+python-multipart==0.0.9
+SQLAlchemy==2.0.27
+ultralytics==8.1.2
+python-jose==3.3.0
+passlib==1.7.4
+
+# Development tools
+python-dotenv==1.0.1
+pytest==8.0.1
